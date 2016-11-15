@@ -1,7 +1,7 @@
 {
-  "name": "node-mac-notifier",
+  "name": "electron-mac-notifier",
   "version": "0.0.13",
-  "description": "Create native OS X notifications from Node.js",
+  "description": "Fork of node-mac-notifier. Create native OS X notifications from Node.js",
   "main": "index.js",
   "scripts": {
     "install": "node-gyp rebuild",
@@ -10,7 +10,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/CharlieHess/node-mac-notifier"
+    "url": "https://github.com/ccnokes/node-mac-notifier"
   },
   "os": [
     "darwin"

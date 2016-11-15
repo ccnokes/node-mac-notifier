@@ -6,6 +6,7 @@
 struct NotificationActivationInfo {
   Nan::Callback *callback;
   bool isReply;
+  bool isClose;
   const char *response;
   const char *id;
 };

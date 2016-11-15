@@ -15,13 +15,14 @@ static void AsyncSendHandler(uv_async_t *handle) {
 
   NSLog(@"Invoked notification with id: %s", info->id);
 
-  v8::Local<v8::Value> argv[3] = {
+  v8::Local<v8::Value> argv[4] = {
     Nan::New(info->isReply),
     Nan::New(info->response).ToLocalChecked(),
-    Nan::New(info->id).ToLocalChecked()
+    Nan::New(info->id).ToLocalChecked(),
+    Nan::New(info->isClose),
   };
 
-  info->callback->Call(3, argv);
+  info->callback->Call(4, argv);
 }
 
 /**
@@ -45,9 +46,32 @@ static void AsyncSendHandler(uv_async_t *handle) {
 - (void)userNotificationCenter:(NSUserNotificationCenter *)center
        didActivateNotification:(NSUserNotification *)notification
 {
+  bool isClose = false;
+
+  switch(notification.activationType) {
+    // Not sure when this is true
+    case NSUserNotificationActivationTypeNone:
+      break;
+
+    // Top level alternate action button clicked
+    case NSUserNotificationActivationTypeActionButtonClicked:
+      isClose = true;
+      break;
+
+    // Not in use currently by this lib but could be in the future
+    case NSUserNotificationActivationTypeAdditionalActionClicked:
+      break;
+
+    case NSUserNotificationActivationTypeContentsClicked: // General notification area clicked
+    case NSUserNotificationActivationTypeReplied: // Reply button clicked and sent
+      isClose = false;
+      break;
+  }
+
   Info.isReply = notification.activationType == NSUserNotificationActivationTypeReplied;
   Info.id = strdup(notification.identifier.UTF8String);
   Info.callback = OnActivation;
+  Info.isClose = isClose;
 
   if (Info.isReply) {
     Info.response = strdup(notification.response.string.UTF8String);
@@ -63,9 +87,34 @@ static void AsyncSendHandler(uv_async_t *handle) {
 }
 
 - (BOOL)userNotificationCenter:(NSUserNotificationCenter *)center
-     shouldPresentNotification:(NSUserNotification *)notification
+    shouldPresentNotification:(NSUserNotification *)notification
 {
   return YES;
+}
+
+// This is an undocumented method that we need to be notified if a user clicks the close button.
+- (void)userNotificationCenter:(NSUserNotificationCenter *)center
+    didDismissAlert:(NSUserNotification *)notification
+{
+  // This is some ugly copy and paste
+  // TODO figure how to centralize this logic
+
+  Info.isReply = notification.activationType == NSUserNotificationActivationTypeReplied;
+  Info.id = strdup(notification.identifier.UTF8String);
+  Info.callback = OnActivation;
+  Info.isClose = !Info.isReply;
+
+  if (Info.isReply) {
+    Info.response = strdup(notification.response.string.UTF8String);
+  } else {
+    Info.response = "";
+  }
+
+  // Stash a pointer to the activation information and push it onto the libuv
+  // event loop. Note that the info must be class-local otherwise it'll be
+  // garbage collected before the event is handled.
+  async.data = &Info;
+  uv_async_send(&async);
 }
 
 @end
