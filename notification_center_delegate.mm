@@ -1,9 +1,18 @@
 #include "notification_center_delegate.h"
 
+struct NotificationActivationInfo {
+  Nan::Callback *callback;
+  bool isReply;
+  std::string response;
+  std::string id;
+  bool isClose;
+};
+
 @implementation NotificationCenterDelegate
 
-uv_loop_t *defaultLoop = uv_default_loop();
-uv_async_t async;
+static void DeleteAsyncHandle(uv_handle_t *handle) {
+  delete (uv_async_t *)handle;
+}
 
 /**
  * This handler runs in the V8 context as a result of `uv_async_send`. Here we
@@ -11,9 +20,9 @@ uv_async_t async;
  */
 static void AsyncSendHandler(uv_async_t *handle) {
   Nan::HandleScope scope;
-  NotificationActivationInfo *info = static_cast<NotificationActivationInfo *>(handle->data);
+  auto *info = static_cast<NotificationActivationInfo *>(handle->data);
 
-  NSLog(@"Invoked notification with id: %s", info->id);
+  // NSLog(@"Invoked notification with id: %s", info->id);
 
   v8::Local<v8::Value> argv[4] = {
     Nan::New(info->isReply),
@@ -23,6 +32,11 @@ static void AsyncSendHandler(uv_async_t *handle) {
   };
 
   info->callback->Call(4, argv);
+  
+  delete info;
+  info = nullptr;
+  handle->data = nullptr;
+  uv_close((uv_handle_t *)handle, DeleteAsyncHandle);
 }
 
 /**
@@ -33,11 +47,31 @@ static void AsyncSendHandler(uv_async_t *handle) {
 {
   if (self = [super init]) {
     OnActivation = onActivation;
+  }
+  
+  return self;
+}
 
-    uv_async_init(defaultLoop, &async, (uv_async_cb)AsyncSendHandler);
+// handles didActivateNotification & didDismissAlert
+- (void) handleNotification:(NSUserNotification *)notification
+          isClose:(bool)isClose 
+{
+  auto *info = new NotificationActivationInfo();
+  info->isReply = notification.activationType == NSUserNotificationActivationTypeReplied;
+  info->id = notification.identifier.UTF8String;
+  info->callback = OnActivation;
+  info->isClose = isClose;
+
+  if (info->isReply) {
+    info->response = notification.response.string.UTF8String;
+  } else {
+    info->response = "";
   }
 
-  return self;
+  auto *async = new uv_async_t();
+  async->data = info;
+  uv_async_init(uv_default_loop(), async, (uv_async_cb)AsyncSendHandler);
+  uv_async_send(async);
 }
 
 /**
@@ -67,23 +101,8 @@ static void AsyncSendHandler(uv_async_t *handle) {
       isClose = false;
       break;
   }
-
-  Info.isReply = notification.activationType == NSUserNotificationActivationTypeReplied;
-  Info.id = strdup(notification.identifier.UTF8String);
-  Info.callback = OnActivation;
-  Info.isClose = isClose;
-
-  if (Info.isReply) {
-    Info.response = strdup(notification.response.string.UTF8String);
-  } else {
-    Info.response = "";
-  }
-
-  // Stash a pointer to the activation information and push it onto the libuv
-  // event loop. Note that the info must be class-local otherwise it'll be
-  // garbage collected before the event is handled.
-  async.data = &Info;
-  uv_async_send(&async);
+  
+  [self handleNotification:notification isClose:isClose];
 }
 
 - (BOOL)userNotificationCenter:(NSUserNotificationCenter *)center
@@ -96,25 +115,7 @@ static void AsyncSendHandler(uv_async_t *handle) {
 - (void)userNotificationCenter:(NSUserNotificationCenter *)center
     didDismissAlert:(NSUserNotification *)notification
 {
-  // This is some ugly copy and paste
-  // TODO figure how to centralize this logic
-
-  Info.isReply = notification.activationType == NSUserNotificationActivationTypeReplied;
-  Info.id = strdup(notification.identifier.UTF8String);
-  Info.callback = OnActivation;
-  Info.isClose = !Info.isReply;
-
-  if (Info.isReply) {
-    Info.response = strdup(notification.response.string.UTF8String);
-  } else {
-    Info.response = "";
-  }
-
-  // Stash a pointer to the activation information and push it onto the libuv
-  // event loop. Note that the info must be class-local otherwise it'll be
-  // garbage collected before the event is handled.
-  async.data = &Info;
-  uv_async_send(&async);
+  [self handleNotification:notification isClose:!(notification.activationType == NSUserNotificationActivationTypeReplied)];
 }
 
 @end

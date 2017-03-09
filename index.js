@@ -3,6 +3,7 @@
 const uuid = require('node-uuid');
 const EventTarget = require('event-target-shim');
 const MacNotification = require('bindings')('Notification').MacNotification
+//*NOTE this is leaky. If a user removes all notifications from NC, they aren't cleared from here.
 const notifications = [];
 
 module.exports = class Notification extends EventTarget {
